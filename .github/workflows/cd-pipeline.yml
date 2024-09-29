@@ -1,0 +1,80 @@
+name: cd-pipeline
+
+on:
+  workflow_call:
+
+env:
+  PROJECT_ID: ${{ secrets.GKE_PROJECT }}
+  GAR_LOCATION: southamerica-east1
+  GKE_CLUSTER: tshadz-cluster-1
+  GKE_ZONE: us-central1
+  REPOSITORY: fiap
+  IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
+  TAG: ${{ github.sha }}
+
+jobs:
+  setup-build-publish:
+    name: Setup, Build and Publish
+    runs-on: ubuntu-latest
+    environment: production
+
+    # permissions:
+    #   contents: 'read'
+    #   id-token: 'write'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # Alternative option - authentication via credentials json
+    - id: 'auth'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        credentials_json: '${{ secrets.GCP_CREDENTIALS }}'
+        token_format: 'access_token'
+
+    # Authenticate Docker to Google Cloud Artifact Registry
+    - name: Docker Auth
+      id: docker-auth
+      uses: 'docker/login-action@v1'
+      with:
+        username: 'oauth2accesstoken'
+        password: '${{ steps.auth.outputs.access_token }}'
+        registry: '${{ env.GAR_LOCATION }}-docker.pkg.dev'
+
+    # Get the GKE credentials so we can deploy to the cluster
+    - name: Set up GKE credentials
+      uses: google-github-actions/get-gke-credentials@v2
+      with:
+        cluster_name: ${{ env.GKE_CLUSTER }}
+        location: ${{ env.GKE_ZONE }}
+
+    # Build the Docker image
+    - name: Build
+      run: |-
+        echo $GITHUB_SHA
+        docker build \
+          --tag "${{env.GAR_LOCATION}}-docker.pkg.dev/${{env.PROJECT_ID}}/${{env.REPOSITORY}}/${{env.IMAGE_NAME}}:${{env.TAG}}" \
+          --build-arg GITHUB_SHA="$GITHUB_SHA" \
+          --build-arg GITHUB_REF="$GITHUB_REF" \
+          .
+    # Push the Docker image to Google Artifact Registry
+    - name: Publish
+      run: |-
+        docker push "${{env.GAR_LOCATION}}-docker.pkg.dev/${{env.PROJECT_ID}}/${{env.REPOSITORY}}/${{env.IMAGE_NAME}}:${{env.TAG}}"
+
+  # Plan with Terraform
+  plan:
+    if: ${{ (github.event_name == 'push') || github.event_name == 'pull_request' }}
+    needs: setup-build-publish
+    uses: tshadz-fiap-postech-soat3/terraform-cloud-infra/.github/workflows/terraform-plan-pipeline-ci.yml@main
+    secrets: inherit
+
+  # Deploy with Terraform
+  deploy:
+    if: ${{ (github.event_name == 'push') || github.event_name == 'pull_request' }}
+    needs: 
+      - setup-build-publish
+      - plan
+    uses: tshadz-fiap-postech-soat3/terraform-cloud-infra/.github/workflows/terraform-apply-pipeline-ci.yml@main
+    secrets: inherit
