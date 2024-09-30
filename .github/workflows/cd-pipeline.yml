@@ -6,7 +6,7 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GKE_PROJECT }}
   GAR_LOCATION: southamerica-east1
-  GKE_CLUSTER: tshadz-cluster-1
+  GKE_CLUSTER: kcris-cluster-1
   GKE_ZONE: us-central1
   REPOSITORY: fiap
   IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
